@@ -2,23 +2,42 @@
 
 import React, { useState, useRef, useEffect, FormEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowUp, Terminal, Globe, Cpu } from "lucide-react";
+import { 
+  ArrowUp, Terminal, Globe, Cpu, LogOut, History, Zap, Sparkles, User as UserIcon, Settings
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import Link from "next/link";
+import { User } from "@supabase/supabase-js";
+import { supabase } from "../lib/supabase";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
-  time: string;
+  time?: string;
 }
 
-export default function ChatInterface() {
+interface Chat {
+  id: string;
+  title: string;
+  created_at: string;
+}
+
+interface Usage {
+  used: number;
+  limit: number;
+}
+
+export default function ChatInterface({ user }: { user: User }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const formatTime = (): string => {
@@ -30,6 +49,11 @@ export default function ChatInterface() {
   };
 
   useEffect(() => {
+    fetchChats();
+    fetchUsage();
+  }, []);
+
+  useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTo({
         top: scrollRef.current.scrollHeight,
@@ -37,6 +61,63 @@ export default function ChatInterface() {
       });
     }
   }, [messages]);
+
+  const fetchChats = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/chats`, {
+      headers: { 
+        Authorization: `Bearer ${session?.access_token}` 
+      }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      setChats(data);
+    }
+  };
+
+  const fetchUsage = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/usage`, {
+      headers: { 
+        Authorization: `Bearer ${session?.access_token}` 
+      }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      setUsage(data);
+    }
+  };
+
+  const loadChat = async (chatId: string) => {
+    setLoading(true);
+    setCurrentChatId(chatId);
+    const { data: { session } } = await supabase.auth.getSession();
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/chats/${chatId}`, {
+        headers: { 
+          Authorization: `Bearer ${session?.access_token}` 
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setMessages(data);
+      }
+    } catch (err) {
+      console.error("Failed to load chat:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startNewChat = () => {
+    setCurrentChatId(null);
+    setMessages([]);
+    setInput("");
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+  };
 
   const sendMessage = async (e: FormEvent) => {
     e.preventDefault();
@@ -53,28 +134,44 @@ export default function ChatInterface() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:3001/api/chat", {
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [...messages, userMessage] }),
+        headers: { 
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token}`
+        },
+        body: JSON.stringify({ 
+          messages: [...messages, userMessage].map(m => ({ role: m.role, content: m.content })),
+          chatId: currentChatId 
+        }),
       });
 
       const data = await response.json();
 
+      if (response.ok) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: data.text,
+            time: formatTime(),
+          },
+        ]);
+        if (!currentChatId) {
+          setCurrentChatId(data.chatId);
+          fetchChats();
+        }
+        setUsage(data.usage);
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (error: any) {
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: data.text || "Uplink confirmed, but no data received.",
-          time: formatTime(),
-        },
-      ]);
-    } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "⚠️ **System Error:** Connection to the neural node failed.",
+          content: `⚠️ **Error:** ${error.message || "Uplink failed."}`,
           time: formatTime(),
         },
       ]);
@@ -83,35 +180,80 @@ export default function ChatInterface() {
     }
   };
 
+  const usagePercentage = usage ? Math.min((usage.used / usage.limit) * 100, 100) : 0;
+
   return (
     <div className="flex h-screen bg-black text-white font-sans antialiased overflow-hidden selection:bg-white/20">
-      {/* Sidebar - Liquid Glass */}
+      {/* Sidebar */}
       <aside className="hidden lg:flex w-80 flex-col liquid-glass border-r border-white/5 m-4 rounded-[2rem]">
-        <div className="p-8">
-          <div className="flex items-center gap-3 mb-12">
-            <Link href="/">
-              <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(255,255,255,0.2)]">
-                <Terminal className="text-black w-6 h-6" />
-              </div>
-            </Link>
-            <span className="font-['Instrument_Serif'] text-2xl tracking-tight italic">
-              Studio.ai
-            </span>
+        <div className="p-8 flex flex-col h-full">
+          <div className="flex items-center justify-between mb-12">
+            <div className="flex items-center gap-3">
+              <Link href="/">
+                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(255,255,255,0.2)]">
+                  <Terminal className="text-black w-6 h-6" />
+                </div>
+              </Link>
+              <span className="font-['Instrument_Serif'] text-2xl tracking-tight italic">
+                Studio.ai
+              </span>
+            </div>
           </div>
 
-          <button className="w-full py-4 px-6 liquid-glass hover:bg-white/5 rounded-2xl text-white/70 text-sm font-medium transition-all flex items-center gap-3 border border-white/10 group">
-            <span className="text-xl group-hover:scale-125 transition-transform">
-              +
-            </span>{" "}
+          <button 
+            onClick={startNewChat}
+            className="w-full py-4 px-6 liquid-glass hover:bg-white/5 rounded-2xl text-white/70 text-sm font-medium transition-all flex items-center gap-3 border border-white/10 group mb-8"
+          >
+            <Sparkles className="w-4 h-4 text-blue-400 group-hover:scale-125 transition-transform" />
             New Exploration
           </button>
-        </div>
 
-        <div className="mt-auto p-8 flex items-center gap-3 opacity-30 hover:opacity-100 transition-opacity cursor-default">
-          <Globe size={14} />
-          <p className="text-[9px] uppercase tracking-[0.3em]">
-            Protocol: Active
-          </p>
+          <div className="flex-1 overflow-y-auto space-y-2 mb-8 pr-2 custom-scrollbar">
+            <h3 className="text-[10px] font-bold text-white/20 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+              <History size={12} /> Recent Synapses
+            </h3>
+            {chats.map((chat) => (
+              <button
+                key={chat.id}
+                onClick={() => loadChat(chat.id)}
+                className={`w-full text-left px-4 py-3 rounded-xl text-sm transition-all truncate ${
+                  currentChatId === chat.id ? "bg-white/10 text-white border border-white/10" : "text-white/40 hover:bg-white/5 hover:text-white/60"
+                }`}
+              >
+                {chat.title}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-6">
+            {/* Token Usage Card */}
+            {usage && (
+              <div className="p-4 bg-zinc-900/50 rounded-2xl border border-white/5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-white/40 uppercase tracking-[0.1em]">Neural Credits</span>
+                  <Zap size={12} className="text-yellow-400" />
+                </div>
+                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${usagePercentage}%` }}
+                    className={`h-full ${usagePercentage > 90 ? 'bg-red-500' : usagePercentage > 70 ? 'bg-yellow-500' : 'bg-blue-500'}`}
+                  ></motion.div>
+                </div>
+                <div className="flex justify-between text-[10px] text-white/20">
+                  <span>{usage.used} used</span>
+                  <span>{usage.limit} limit</span>
+                </div>
+              </div>
+            )}
+
+            <button 
+              onClick={handleSignOut}
+              className="flex items-center gap-3 text-white/30 hover:text-red-400 transition-colors text-xs font-medium px-4"
+            >
+              <LogOut size={14} /> Log Out System
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -124,9 +266,14 @@ export default function ChatInterface() {
               <div className="w-2.5 h-2.5 bg-white rounded-full animate-pulse"></div>
               <div className="absolute inset-0 w-2.5 h-2.5 bg-white rounded-full animate-ping opacity-40"></div>
             </div>
-            <span className="text-[10px] font-bold text-white/40 uppercase tracking-[0.25em]">
-              Gemini 1.5 Flash Neural Node
-            </span>
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">
+                Neural Node Status: Active
+              </span>
+              <span className="text-[10px] text-white/20 truncate max-w-[200px]">
+                Ident: {user.email}
+              </span>
+            </div>
           </div>
           <Cpu className="text-white/20 w-5 h-5" />
         </header>
@@ -148,7 +295,7 @@ export default function ChatInterface() {
                     Know it then <em className="italic text-white/50">all</em>.
                   </h2>
                   <p className="text-white/20 text-xs tracking-[0.4em] uppercase">
-                    Transmission ready
+                    Transmission ready for {user.email?.split('@')[0]}
                   </p>
                 </motion.div>
               ) : (
@@ -205,7 +352,7 @@ export default function ChatInterface() {
                             </p>
                           ),
                           li: ({ children }) => (
-                            <li className="ml-4 mb-2 list-decimal">
+                            <li className="ml-4 mb-2 list-disc">
                               {children}
                             </li>
                           ),
@@ -220,8 +367,7 @@ export default function ChatInterface() {
                       </ReactMarkdown>
                     </div>
                     <span className="text-[9px] text-white/20 mt-4 px-4 font-bold uppercase tracking-[0.2em]">
-                      {m.role === "user" ? "Node: Deepanshu" : "Node: Gemini"} •{" "}
-                      {m.time}
+                      {m.role === "user" ? `Node: ${user.email?.split('@')[0]}` : "Node: Gemini"} {m.time ? `• ${m.time}` : ""}
                     </span>
                   </motion.div>
                 ))
@@ -274,6 +420,22 @@ export default function ChatInterface() {
           </div>
         </div>
       </main>
+      <style jsx global>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.2);
+        }
+      `}</style>
     </div>
   );
 }

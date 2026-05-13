@@ -1,11 +1,40 @@
 "use client";
 
-import React, { useRef, useEffect } from "react";
-import { ArrowRight, Terminal } from "lucide-react";
+import React, { useRef, useEffect, useState } from "react";
+import { ArrowRight, Terminal, User as UserIcon, LogOut, LayoutDashboard } from "lucide-react";
 import Link from "next/link";
+import { supabase } from "../lib/supabase";
+import { User } from "@supabase/supabase-js";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function Hero() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -43,6 +72,11 @@ export default function Hero() {
     };
   }, []);
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setShowDropdown(false);
+  };
+
   return (
     <section className="relative min-h-screen w-full overflow-hidden flex flex-col bg-black">
       <video
@@ -56,8 +90,8 @@ export default function Hero() {
         preload="auto"
       />
 
-      <nav className="relative z-20 px-6 py-6 mb-8 w-full">
-        <div className="liquid-glass rounded-full max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
+      <nav className="relative z-[100] px-6 py-6 mb-8 w-full">
+        <div className="liquid-glass rounded-full max-w-5xl mx-auto px-6 py-3 flex items-center justify-between border border-white/5 shadow-2xl">
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-3">
               <Link href="/">
@@ -65,71 +99,117 @@ export default function Hero() {
                   <Terminal className="text-black w-6 h-6" />
                 </div>
               </Link>
-              <span className="font-['Instrument_Serif'] text-2xl tracking-tight italic">
+              <span className="font-['Instrument_Serif'] text-2xl tracking-tight italic text-white">
                 Studio.ai
               </span>
             </div>
-            <div className="hidden md:flex gap-8 ml-12">
+          </div>
+
+          <div className="flex items-center gap-6">
+            <div className="hidden md:flex gap-8">
               {["Features", "About"].map((item) => (
                 <a
                   key={item}
                   href={"#" + item.toLowerCase()}
-                  className="text-white/80 hover:text-white text-sm font-medium transition-colors"
+                  className="text-white/40 hover:text-white text-xs font-bold uppercase tracking-widest transition-colors"
                 >
                   {item}
                 </a>
               ))}
             </div>
+
+            <div className="h-4 w-[1px] bg-white/10 hidden md:block"></div>
+
+            {user ? (
+              <div className="relative" ref={dropdownRef}>
+                <button 
+                  onClick={() => setShowDropdown(!showDropdown)}
+                  className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-all overflow-hidden cursor-pointer relative z-[101]"
+                >
+                  <UserIcon size={18} className="text-white/60" />
+                </button>
+
+                <AnimatePresence>
+                  {showDropdown && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="absolute right-0 mt-4 w-64 bg-zinc-950/95 backdrop-blur-2xl border border-white/10 rounded-2xl p-3 shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-[110]"
+                    >
+                      <div className="px-4 py-4 border-b border-white/5 mb-3">
+                        <p className="text-[10px] font-bold text-white/30 uppercase tracking-widest mb-1">Authenticated Node</p>
+                        <p className="text-xs text-white/90 truncate font-medium">{user.email}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Link 
+                          href="/chat" 
+                          onClick={() => setShowDropdown(false)}
+                          className="flex items-center gap-3 px-4 py-3 text-white/70 hover:text-white hover:bg-white/5 rounded-xl transition-all text-sm group"
+                        >
+                          <LayoutDashboard size={16} className="group-hover:text-blue-400 transition-colors" />
+                          <span className="font-medium">Enter Platform</span>
+                        </Link>
+                        <button 
+                          onClick={handleSignOut}
+                          className="w-full flex items-center gap-3 px-4 py-3 bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 rounded-xl transition-all text-sm group cursor-pointer"
+                        >
+                          <LogOut size={16} className="group-hover:scale-110 transition-transform" />
+                          <span className="font-bold uppercase tracking-tight">Log Out System</span>
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            ) : (
+              <div className="flex items-center gap-4">
+                <Link href="/chat" className="text-white/40 hover:text-white text-xs font-bold uppercase tracking-widest transition-colors">
+                  Sign In
+                </Link>
+                <Link href="/chat">
+                  <button className="bg-white text-black rounded-full px-6 py-2.5 text-xs font-bold uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(255,255,255,0.15)] cursor-pointer">
+                    Get Started
+                  </button>
+                </Link>
+              </div>
+            )}
           </div>
-          {/* <div className="flex items-center gap-4">
-            <button className="text-white text-sm font-medium">Sign Up</button>
-            <button className="liquid-glass rounded-full px-6 py-2 text-white text-sm font-medium">
-              Login
-            </button>
-          </div> */}
         </div>
       </nav>
 
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 text-center -translate-y-[10%]">
-        <h1 className="text-6xl md:text-8xl lg:text-9xl text-white tracking-tight font-['Instrument_Serif'] leading-none mb-8">
-          Know it then <em className="italic">all</em>.
-        </h1>
+        <motion.h1 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
+          className="text-6xl md:text-8xl lg:text-9xl text-white tracking-tight font-['Instrument_Serif'] leading-none mb-8"
+        >
+          Know it then <em className="italic text-white/50">all</em>.
+        </motion.h1>
 
-        {/* <div className="max-w-xl w-full mb-6">
-          <div className="liquid-glass rounded-full pl-6 pr-2 py-2 flex items-center gap-3">
-            <input
-              type="email"
-              placeholder="Enter your email"
-              className="flex-1 bg-transparent border-none outline-none text-white placeholder:text-white/40 text-sm"
-            />
-            <button className="bg-white rounded-full p-3 text-black hover:scale-105 transition-transform">
-              <ArrowRight size={20} />
+        <motion.p 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5, duration: 1 }}
+          className="text-white/40 text-xs uppercase tracking-[0.4em] font-medium max-w-sm mb-12 leading-relaxed"
+        >
+          Advanced neural orchestration for the next generation of digital intelligence.
+        </motion.p>
+
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.8, duration: 0.8 }}
+        >
+          <Link href="/chat">
+            <button className="group relative liquid-glass cursor-pointer rounded-full px-12 py-5 text-white text-xs font-bold hover:bg-white/5 transition-all border border-white/10 uppercase tracking-[0.3em] overflow-hidden">
+              <span className="relative z-10">Enter Chat Platform</span>
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
             </button>
-          </div>
-        </div> */}
-
-        <p className="text-white/60 text-sm max-w-sm mb-10 leading-relaxed">
-          Stay updated with the latest AI breakthroughs. Join 10,000+ developers
-          mastering the future of chat.
-        </p>
-
-        <Link href="/chat">
-          <button className="liquid-glass cursor-pointer rounded-full px-10 py-4 text-white text-sm font-medium hover:bg-white/5 transition-colors border border-white/10 uppercase tracking-widest">
-            Enter Chat Platform
-          </button>
-        </Link>
+          </Link>
+        </motion.div>
       </div>
-
-      {/* <div className="relative z-10 flex justify-center gap-4 pb-12">
-        {[Globe].map((Icon, i) => (
-          <button
-            key={i}
-            className="liquid-glass rounded-full p-4 text-white/80 hover:text-white hover:bg-white/5 transition-all"
-          >
-            <Icon size={20} />
-          </button>
-        ))}
-      </div> */}
     </section>
   );
 }
